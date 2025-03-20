@@ -179,7 +179,7 @@ enum PDFGraphics {
 
      - Returns: Resized version of `image`
      */
-    static func resize(image: Image, frame: CGRect, quality: CGFloat) -> Image {
+    internal static func resize(image: Image, frame: CGRect, quality: CGFloat) -> Image {
         let factor: CGFloat = min(3 * quality, 1)
         let resizeFactor = factor.isZero ? 0.2 : factor
 
@@ -187,21 +187,21 @@ enum PDFGraphics {
         let size = CGSize(width: floor(frame.width * resizeFactor),
                           height: floor(frame.height * resizeFactor))
 
-        #if os(iOS) || os(visionOS)
-            UIGraphicsBeginImageContext(size)
+        #if os(iOS)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let finalImage = renderer.image { context in
             image.draw(in: CGRect(origin: .zero, size: size))
-            let finalImage = UIGraphicsGetImageFromCurrentImageContext()
-            UIGraphicsEndImageContext()
-
-            return finalImage ?? image
+        }
+        return finalImage
+        
         #elseif os(macOS)
-            let finalImage = NSImage(size: size)
-            finalImage.lockFocus()
-            let context = NSGraphicsContext.current!
-            context.imageInterpolation = .high
-            image.draw(in: CGRect(origin: .zero, size: size))
-            finalImage.unlockFocus()
-            return finalImage
+        let finalImage = NSImage(size: size)
+        finalImage.lockFocus()
+        let context = NSGraphicsContext.current!
+        context.imageInterpolation = .high
+        image.draw(in: CGRect(origin: .zero, size: size))
+        finalImage.unlockFocus()
+        return finalImage
         #endif
     }
 
@@ -242,42 +242,42 @@ enum PDFGraphics {
 
      - Returns: Manipulated image
      */
-    static func round(image: Image, frameSize: CGSize, corners: RectCorner, cornerRadius: CGFloat?) -> Image {
+    internal static func round(image: Image, frameSize: CGSize, corners: RectCorner, cornerRadius: CGFloat?) -> Image {
         let size = image.size
 
         var cornerRadii = CGSize.zero
         if var radius = cornerRadius {
-            radius *= (frameSize.width > frameSize.height ? size.width / frameSize.width : size.height / frameSize.height)
+            radius = radius * (frameSize.width > frameSize.height ? size.width / frameSize.width : size.height / frameSize.height)
             cornerRadii = CGSize(width: radius, height: radius)
         } else {
             let radius = size.width < size.height ? frameSize.width / 2 : frameSize.height / 2
             cornerRadii = CGSize(width: radius, height: radius)
         }
 
-        let clipPath = BezierPath(roundedRect: CGRect(origin: .zero, size: size), byRoundingCorners: corners, cornerRadii: cornerRadii)
+        let clipPath = BezierPath(roundedRect: CGRect(origin: .zero, size: size),
+                                byRoundingCorners: corners,
+                                cornerRadii: cornerRadii)
 
-        #if os(iOS) || os(visionOS)
-            UIGraphicsBeginImageContext(size)
+        #if os(iOS)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let finalImage = renderer.image { context in
+            clipPath.addClip()
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        return finalImage
+        
         #elseif os(macOS)
-            let finalImage = NSImage(size: size)
-            finalImage.lockFocus()
-        #endif
-
+        let finalImage = NSImage(size: size)
+        finalImage.lockFocus()
         clipPath.addClip()
         image.draw(in: CGRect(origin: .zero, size: size))
-
-        #if os(iOS) || os(visionOS)
-            let finalImage = UIGraphicsGetImageFromCurrentImageContext()
-            UIGraphicsEndImageContext()
-            return finalImage ?? image
-        #elseif os(macOS)
-            finalImage.unlockFocus()
-            guard let data = finalImage.tiffRepresentation,
-                  let imageRep = NSBitmapImageRep(data: data),
-                  let pngData = imageRep.representation(using: .png, properties: [:]) else {
-                return image
-            }
-            return NSImage(data: pngData) ?? image
+        finalImage.unlockFocus()
+        guard let data = finalImage.tiffRepresentation,
+              let imageRep = NSBitmapImageRep(data: data),
+              let pngData = imageRep.representation(using: .png, properties: [:]) else {
+            return image
+        }
+        return NSImage(data: pngData) ?? image
         #endif
     }
 
@@ -288,34 +288,38 @@ enum PDFGraphics {
         case dotted(foreColor: Color, backColor: Color)
         func setFill(in context: PDFContext) {
             switch self {
-            case let .dotted(foreColor, backColor):
-                let size = CGSize(width: 5, height: 5)
+                case .dotted(let foreColor, let backColor):
+                    let size = CGSize(width: 5, height: 5)
 
-                #if os(iOS) || os(visionOS)
-                    UIGraphicsBeginImageContext(size)
-                #elseif os(macOS)
+                    #if os(iOS)
+                    let renderer = UIGraphicsImageRenderer(size: size)
+                    let image = renderer.image { rendererContext in
+                        Color.clear.setStroke()
+                        backColor.setFill()
+                        var path = BezierPath(rect: CGRect(x: 0, y: 0, width: 5, height: 5))
+                        path.fill()
+
+                        foreColor.setFill()
+                        path = BezierPath(ovalIn: CGRect(x: 2.5, y: 2.5, width: 2.5, height: 2.5))
+                        path.fill()
+                    }
+                    
+                    #elseif os(macOS)
                     let image = NSImage(size: size)
                     image.lockFocus()
-                #endif
+                    Color.clear.setStroke()
+                    backColor.setFill()
+                    var path = BezierPath(rect: CGRect(x: 0, y: 0, width: 5, height: 5))
+                    path.fill()
 
-                Color.clear.setStroke()
-                backColor.setFill()
-                var path = BezierPath(rect: CGRect(x: 0, y: 0, width: 5, height: 5))
-                path.fill()
-
-                foreColor.setFill()
-                path = BezierPath(ovalIn: CGRect(x: 2.5, y: 2.5, width: 2.5, height: 2.5))
-                path.fill()
-
-                #if os(iOS) || os(visionOS)
-                    let image = UIGraphicsGetImageFromCurrentImageContext()!
-                    UIGraphicsEndImageContext()
-                #elseif os(macOS)
+                    foreColor.setFill()
+                    path = BezierPath(ovalIn: CGRect(x: 2.5, y: 2.5, width: 2.5, height: 2.5))
+                    path.fill()
                     image.unlockFocus()
-                #endif
+                    #endif
 
-                context.setFillColor(Color(patternImage: image).cgColor)
-            }
+                    context.setFillColor(Color(patternImage: image).cgColor)
+                }
         }
     }
 }
